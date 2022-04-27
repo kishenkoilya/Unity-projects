@@ -291,7 +291,7 @@ namespace Utility {
             }
         }
 
-        public List<Figure> ScanTexture(Texture2D texture) {
+        public void ScanTexture(Texture2D texture) {
             tex = texture;
             InitializeScannedPixels();
             FindFigures();
@@ -300,8 +300,8 @@ namespace Utility {
             }
 
 
-            // Transform tr = GameObject.Find("Map").GetComponent<Transform>();
-            // tr.localScale = new Vector3(tex.width / 10f, 1, tex.height / 10f);
+            Transform tr = GameObject.Find("Map").GetComponent<Transform>();
+            tr.localScale = new Vector3(tex.width / 10f, 1, tex.height / 10f);
             // foreach (Figure f in figures) {
             //     LinkedList<Vector2> vertices = f.GetVertices();
             //     int i = ss.CreateSphereList();
@@ -309,8 +309,15 @@ namespace Utility {
             //         ss.SpawnSphere(i, new Vector3(v.x, 0, v.y));
             //     }
             // }
+        }
 
+        public void AddTowerEdges(int edgesNumber) {
+            foreach (Figure f in figures) {
+                f.AddEdges(edgesNumber);
+            }
+        }
 
+        public List<Figure> GetFigures() {
             return figures;
         }
         public void SphereSpawnerClear() {

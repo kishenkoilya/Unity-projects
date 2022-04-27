@@ -8,13 +8,18 @@ namespace Utility {
     {
         private LinkedList<Vector2> vertices;
         private LinkedList<LinkedList<Vector2>> holes;
+        private LinkedList<LinkedListNode<Vector2>> concaveVertices;
+        private LinkedList<LinkedListNode<Vector2>> ears;
         private int textureWidth;
         private int textureHeight;
-        private const float coordinateError = 0.0001f; 
+        private int towerEdges;
+        private float[] edgeXCoordinates;
 
         public Figure(int width, int height) {
             vertices = new LinkedList<Vector2>();
             holes = new LinkedList<LinkedList<Vector2>>();
+            concaveVertices = new LinkedList<LinkedListNode<Vector2>>();
+            ears = new LinkedList<LinkedListNode<Vector2>>();
             textureWidth = width;
             textureHeight = height;
         }
@@ -107,11 +112,80 @@ namespace Utility {
             }
         }
 
+        void FillEdgeCoordinates() {
+            edgeXCoordinates = new float[towerEdges + 1];
+            for (int i = 0; i <= towerEdges; i++)
+            {
+                edgeXCoordinates[i] = (float)i * textureWidth / towerEdges;
+            }
+        }
+
+        bool AddEdgeBetween(LinkedListNode<Vector2> currentNode, LinkedListNode<Vector2> nextNode) {
+            if (Mathf.Approximately(currentNode.Value.x, nextNode.Value.x)) {
+                return false;
+            }
+            else {
+                float segment1 = currentNode.Value.x * towerEdges / textureWidth;
+                float segment2 = nextNode.Value.x * towerEdges / textureWidth;
+                if (Mathf.Approximately(Mathf.Round(segment1), segment1))
+                    segment1 = Mathf.Round(segment1);
+                if (Mathf.Approximately(Mathf.Round(segment2), segment2))
+                    segment2 = Mathf.Round(segment2);
+                
+                if (Mathf.Ceil(Mathf.Max(segment1, segment2)) - Mathf.Floor(Mathf.Min(segment1, segment2)) > 1) {
+                    Vector2 result;
+                    if (segment1 > segment2) {
+                        float newX = edgeXCoordinates[(int)(!Mathf.Approximately(Mathf.Floor(segment1), segment1) ? Mathf.Floor(segment1) : Mathf.Floor(segment1) - 1)];
+                        if (!Mathf.Approximately(currentNode.Value.y, nextNode.Value.y)) {
+                            float newY = (currentNode.Value.x - newX) / (currentNode.Value.x - nextNode.Value.x) * (nextNode.Value.y - currentNode.Value.y) + currentNode.Value.y;
+                            result = new Vector2(newX, newY);
+                        }
+                        else {
+                            result = new Vector2(newX, currentNode.Value.y);
+                        }
+                    }
+                    else {
+                        float newX = edgeXCoordinates[(int)(!Mathf.Approximately(Mathf.Ceil(segment1), segment1) ? Mathf.Ceil(segment1) : Mathf.Ceil(segment1) + 1)];
+                        if (!Mathf.Approximately(currentNode.Value.y, nextNode.Value.y)) {
+                            float newY = (newX - currentNode.Value.x) / (nextNode.Value.x - currentNode.Value.x) * (nextNode.Value.y - currentNode.Value.y) + currentNode.Value.y;
+                            result = new Vector2(newX, newY);
+                        }
+                        else {
+                            result = new Vector2(newX, currentNode.Value.y);
+                        }
+                    }
+                    vertices.AddAfter(currentNode, result);
+                    return true;
+                }
+                else 
+                    return false;
+            }
+        }
+
+        public void AddEdges(int edgesNumber) {
+            LinkedListNode<Vector2> currentNode = vertices.First;
+            LinkedListNode<Vector2> nextNode;
+            towerEdges = edgesNumber;
+            FillEdgeCoordinates();
+            while (true) {
+                nextNode = currentNode.Next ?? vertices.First;
+                if (AddEdgeBetween(currentNode, nextNode)) {
+                    currentNode = currentNode.Next ?? vertices.First;
+                }
+                else {
+                    currentNode = nextNode;
+                }
+
+                if (currentNode == vertices.First)
+                    break;
+            }
+        }
+
         private float CrossProduction2D(Vector2 to1, Vector2 to2, Vector2 from) {//8,3   10,1   14,1
             return (to1.x - from.x) * (to2.y - from.y) - (to2.x - from.x) * (to1.y - from.y);//(8 - 14)(1 - 1) - (10 - 14)(3 - 1)
         }
         private bool CheckIsVertexInsideTriangle(Vector2 v1, Vector2 v2, Vector2 v3, Vector2 point) {
-            if (Vector2.Distance(point, v1) < coordinateError || Vector2.Distance(point, v2) < coordinateError || Vector2.Distance(point, v3) < coordinateError)
+            if (Vector2.Distance(point, v1) < Mathf.Epsilon || Vector2.Distance(point, v2) < Mathf.Epsilon || Vector2.Distance(point, v3) < Mathf.Epsilon)
                 return false;
             // if (CrossProduction2D(v1,v2,v3) == 0)
             //     return true;
@@ -122,18 +196,20 @@ namespace Utility {
             bool has_pos = (det1 > 0) || (det2 > 0) || (det3 > 0);
             return !(has_neg && has_pos);
         }
-        private bool CheckIsVerticesInsideTriangle(LinkedListNode<Vector2> currentNode) {
-            LinkedListNode<Vector2> previousNode, nextNode, checkingNode;
+
+        private bool CheckTriangleEmpty(LinkedListNode<Vector2> currentNode) {
+            LinkedListNode<Vector2> previousNode, nextNode;
+            LinkedListNode<LinkedListNode<Vector2>> checkingNode;
             previousNode = currentNode.Previous == null ? vertices.Last : currentNode.Previous;
             nextNode = currentNode.Next == null ? vertices.First : currentNode.Next;
-            checkingNode = nextNode.Next == null ? vertices.First : nextNode.Next;
-            for (int i = 0; i < vertices.Count - 3; i++) {
-                if (CheckIsVertexInsideTriangle(previousNode.Value, currentNode.Value, nextNode.Value, checkingNode.Value)) {
-                    return true;
+            checkingNode = concaveVertices.First;
+            for (int i = 0; i < concaveVertices.Count; i++) {
+                if (CheckIsVertexInsideTriangle(previousNode.Value, currentNode.Value, nextNode.Value, checkingNode.Value.Value)) {
+                    return false;
                 }
-                checkingNode = checkingNode.Next == null ? vertices.First : checkingNode.Next;
+                checkingNode = checkingNode.Next ?? concaveVertices.First;
             }
-            return false;
+            return true;
         }
 
         private (Dictionary<LinkedListNode<Vector2>, int>, Vector3[]) CreateMeshVertices() {
@@ -149,17 +225,17 @@ namespace Utility {
             return (listToVerticeNumDictionary, mVertices);
         }
 
-        private bool VerticesInOneSegment(int segmentsNumber, Vector2 v1, Vector2 v2, Vector2 v3) {
+        private bool VerticesInOneSegment(Vector2 v1, Vector2 v2, Vector2 v3) {
             float seg1, seg2, seg3;
             
-            seg1 = v1.x * segmentsNumber / textureWidth;
-            seg2 = v2.x * segmentsNumber / textureWidth;
-            seg3 = v3.x * segmentsNumber / textureWidth;
-            if (Mathf.Abs(Mathf.Round(seg1) - seg1) < coordinateError * 10)
+            seg1 = v1.x * towerEdges / textureWidth;
+            seg2 = v2.x * towerEdges / textureWidth;
+            seg3 = v3.x * towerEdges / textureWidth;
+            if (Mathf.Approximately(Mathf.Round(seg1), seg1))
                 seg1 = Mathf.Round(seg1);
-            if (Mathf.Abs(Mathf.Round(seg2) - seg2) < coordinateError * 10)
+            if (Mathf.Approximately(Mathf.Round(seg2), seg2))
                 seg2 = Mathf.Round(seg2);
-            if (Mathf.Abs(Mathf.Round(seg3) - seg3) < coordinateError * 10)
+            if (Mathf.Approximately(Mathf.Round(seg3), seg3))
                 seg3 = Mathf.Round(seg3);
             if (v1.y != v2.y || v2.y != v3.y || v3.y != v1.y) {
                 // Debug.Log($"v1: {v1}, v2: {v2}, v3: {v3}");
@@ -168,62 +244,129 @@ namespace Utility {
             }
             return Mathf.Ceil(Mathf.Max(seg1, seg2, seg3)) - Mathf.Floor(Mathf.Min(seg1, seg2, seg3)) <= 1;
         }
-        private int[] CreateMeshTriangles(Dictionary<LinkedListNode<Vector2>, int> listToVerticeNumDictionary, int segmentsNumber) {
+
+        bool CheckVertexIsEar(LinkedListNode<Vector2> node) {
+            LinkedListNode<Vector2> nextNode = node.Next ?? vertices.First;
+            LinkedListNode<Vector2> previousNode = node.Previous ?? vertices.Last;
+            if (CrossProduction2D(nextNode.Value, previousNode.Value, node.Value) > 0) {
+                if (VerticesInOneSegment(previousNode.Value, node.Value, nextNode.Value)) {
+                    if (CheckTriangleEmpty(node)) {
+                        return true;
+                    }
+                    else
+                        return false;
+                }
+                else
+                    return false;
+            }
+            else
+                return false;
+        }
+
+        void FindConcaveVertices() {
             LinkedListNode<Vector2> currentNode = vertices.First;
+            LinkedListNode<Vector2> nextNode = currentNode.Next ?? vertices.First;
+            LinkedListNode<Vector2> previousNode = currentNode.Previous ?? vertices.Last;
+            while (true) {
+                if (CrossProduction2D(nextNode.Value, previousNode.Value, currentNode.Value) < 0) {
+                    concaveVertices.AddLast(currentNode);
+                }
+                currentNode = nextNode;
+                nextNode = currentNode.Next ?? vertices.First;
+                previousNode = currentNode.Previous ?? vertices.Last;
+                if (currentNode == vertices.First)
+                    break;
+            }
+        }
+
+        void FindEars() {
+            LinkedListNode<Vector2> currentNode = vertices.First;
+            while (true) {
+                if (CheckVertexIsEar(currentNode)) {
+                    ears.AddLast(currentNode);
+                }
+                currentNode = currentNode.Next ?? vertices.First;
+                if (currentNode == vertices.First)
+                    break;
+            }
+        }
+
+        void CheckVertexStatus(LinkedListNode<Vector2> node) {
+            LinkedListNode<LinkedListNode<Vector2>> ear = null;
+            LinkedListNode<LinkedListNode<Vector2>> concave = null;
+            LinkedListNode<LinkedListNode<Vector2>> currentNode = ears.First;
+            for (int i = 0; i < ears.Count; i++)
+            {
+                if (node == currentNode.Value) {
+                    ear = currentNode;
+                    break;
+                }
+                currentNode = currentNode.Next;
+            }
+            currentNode = concaveVertices.First;
+            for (int i = 0; i < concaveVertices.Count; i++)
+            {
+                if (node == currentNode.Value) {
+                    concave = currentNode;
+                    break;
+                }
+                currentNode = currentNode.Next;
+            }
+
+            if (concave != null) {
+                LinkedListNode<Vector2> nextNode = node.Next ?? vertices.First;
+                LinkedListNode<Vector2> previousNode = node.Previous ?? vertices.Last;
+                if (CrossProduction2D(nextNode.Value, previousNode.Value, node.Value) > 0) {
+                    concaveVertices.Remove(concave);
+                }
+            }
+
+            if (CheckVertexIsEar(node)) {
+                if (ear == null)
+                    ears.AddLast(node);
+            }
+            else {
+                if (ear != null) {
+                    ears.Remove(ear);
+                }
+            }
+        }
+        private int[] CreateMeshTriangles(Dictionary<LinkedListNode<Vector2>, int> listToVerticeNumDictionary) {
+            FindConcaveVertices();
+            FindEars();
+            LinkedListNode<LinkedListNode<Vector2>> currentNode = ears.First;
             LinkedListNode<Vector2> previousNode, nextNode;
             int[] mTriangles = new int[(vertices.Count - 2) * 3];
             int triangleNum = 0;
-            int counter = 0;
-            int faultCounterSegment = 0;
-            int faultCounterAngle = 0;
-            int faultCounterPointInTriangle = 0;
-            while (vertices.Count > 2) {
-                counter++;
-                if (counter > 1000000) {
-                    Debug.LogError("Mesh triangles failed to triangulate.");
-                    Debug.LogError($"faultCounterSegment: {faultCounterSegment}, faultCounterAngle: {faultCounterAngle}, faultCounterPointInTriangle: {faultCounterPointInTriangle}");
-                    break;
-                }
-                previousNode = currentNode.Previous == null ? vertices.Last : currentNode.Previous;
-                nextNode = currentNode.Next == null ? vertices.First : currentNode.Next;
-                if (!VerticesInOneSegment(segmentsNumber, previousNode.Value, currentNode.Value, nextNode.Value)){
-                    currentNode = nextNode;
-                    faultCounterSegment++;
-                    continue;
-                }
-                float crossProd = CrossProduction2D(nextNode.Value, previousNode.Value, currentNode.Value);
-                if (crossProd > 0) {
-                    bool triangleEmpty = !CheckIsVerticesInsideTriangle(currentNode);
-                    if (triangleEmpty) {
-                        mTriangles[triangleNum * 3 + 0] = listToVerticeNumDictionary[nextNode];
-                        mTriangles[triangleNum * 3 + 1] = listToVerticeNumDictionary[currentNode];
-                        mTriangles[triangleNum * 3 + 2] = listToVerticeNumDictionary[previousNode];
-                        triangleNum++;
-                        vertices.Remove(currentNode);
-                        currentNode = nextNode;
-                        continue;
-                    }
-                    else {
-                        faultCounterPointInTriangle++;
-                        // Debug.Log("Is point inside");
-                    }
-                }
-                else {
-                    faultCounterAngle++;
-                    // Debug.Log($"v1: {nextNode.Value}, v2: {previousNode.Value}, v3: {currentNode.Value}, crossP: {crossProd}");
-                }
-                currentNode = nextNode;
+            while (ears.Count > 0) {
+                previousNode = currentNode.Value.Next ?? vertices.First;
+                nextNode = currentNode.Value.Previous ?? vertices.Last;
+                // Debug.Log(previousNode.Value + " " + currentNode.Value.Value + " " + nextNode.Value);
+
+                mTriangles[triangleNum * 3 + 0] = listToVerticeNumDictionary[previousNode];
+                mTriangles[triangleNum * 3 + 1] = listToVerticeNumDictionary[currentNode.Value];
+                mTriangles[triangleNum * 3 + 2] = listToVerticeNumDictionary[nextNode];
+                triangleNum++;
+                vertices.Remove(currentNode.Value);
+                ears.Remove(currentNode);
+                CheckVertexStatus(nextNode);
+                CheckVertexStatus(previousNode);
+                currentNode = ears.First;
             }
+
             return mTriangles;
         }
-        public Mesh CreateMesh(int segmentsNumber) {
+        public (Vector2[], int[]) CreateMesh() {
             Mesh mesh = new Mesh();
+            Vector2[] verts = new Vector2[vertices.Count];
+            vertices.CopyTo(verts, 0);
             (Dictionary<LinkedListNode<Vector2>, int> listToVerticeNumDictionary, Vector3[] mVertices) = CreateMeshVertices();
             mesh.vertices = mVertices;
+
             // SphereSpawner ss = new SphereSpawner();
             // int x = ss.CreateSphereList();
             // VisualizeVertices(ss, x);
-                    mesh.triangles = CreateMeshTriangles(listToVerticeNumDictionary, segmentsNumber);
+                    mesh.triangles = CreateMeshTriangles(listToVerticeNumDictionary);
             // x = ss.CreateSphereList();
             // VisualizeVertices(ss, x);
             // mesh.RecalculateNormals();
@@ -232,7 +375,7 @@ namespace Utility {
             // MeshFilter mf = go.AddComponent<MeshFilter>();
             // mf.mesh = mesh;
             // go.AddComponent<MeshRenderer>();
-            return mesh;
+            return (verts, mesh.triangles);
         }
 
     }

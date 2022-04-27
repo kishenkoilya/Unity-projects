@@ -17,8 +17,9 @@ public class TowerCreator : EditorWindow
     private Texture2D levelConfiguration;
     private GameObject tower;
     private List<GameObject> figures;
+    private Vector3[] towerVerticesExternal;
+    private Vector3[] towerVerticesInternal;
 
-    private const float coordinateError = 0.0001f;
     /// <summary>
     /// OnGUI is called for rendering and handling GUI events.
     /// This function can be called multiple times per frame (one call per event).
@@ -126,222 +127,94 @@ public class TowerCreator : EditorWindow
         tower.AddComponent<MeshRenderer>();
         tower.GetComponent<MeshRenderer>().material = material;
     }
+    
+    Vector3 TransformVector2To3(Vector2 vector, bool external) {
+        float segment = vector.x * vertexNumber / levelConfiguration.width;
+        bool rounded = false;
+        if (Mathf.Approximately(Mathf.Round(segment), segment)) {
+            segment = Mathf.Round(segment);
+            rounded = true;
+        }
 
-    (List<Vector3>, List<Vector3>, LinkedList<Vector2>) CreateLevelFigureVertices(LinkedList<Vector2> figureVertices) {
-        List<Vector3> levelFigureVertices = new List<Vector3>();
-        List<Vector3> levelFigureVerticesInternal = new List<Vector3>();
-        Vector3[] polygonVertices = CreatePolygonVerteces(vertexNumber, towerRadius);
-        Vector3[] polygonVerticesInternal = CreatePolygonVerteces(vertexNumber, towerRadius - floorWidth);
-        float polygonLength = 0;
-        float polygonLengthInternal = 0;
-        for (int i = 0; i < polygonVertices.Length; i+=2) {
-            polygonLength += Vector3.Distance(polygonVertices[i], polygonVertices[(i+2)%polygonVertices.Length]);
+        Vector3 result = external ? towerVerticesExternal[((int)Mathf.Floor(segment) * 2) % towerVerticesExternal.Length] : 
+                                    towerVerticesInternal[((int)Mathf.Floor(segment) * 2) % towerVerticesInternal.Length];
+        Vector3 nextVertex = external ? towerVerticesExternal[(((int)Mathf.Floor(segment) + 1) * 2) % towerVerticesExternal.Length] : 
+                                        towerVerticesInternal[(((int)Mathf.Floor(segment) + 1) * 2) % towerVerticesInternal.Length];
+        if (!rounded) {
+            result = Vector3.MoveTowards(result, nextVertex, Vector3.Distance(result, nextVertex) * (segment - Mathf.Floor(segment)));
         }
-        for (int i = 0; i < polygonVerticesInternal.Length; i+=2) {
-            polygonLengthInternal += Vector3.Distance(polygonVerticesInternal[i], polygonVerticesInternal[(i+2)%polygonVerticesInternal.Length]);
-        }
-        int imageWidth = levelConfiguration.width;
-        int imageHeigth = levelConfiguration.height;
-        LinkedListNode<Vector2> currentNode, nextNode;
-        currentNode = figureVertices.First;
-        nextNode = currentNode.Next == null ? figureVertices.First : currentNode.Next;
+        result += Vector3.up * vector.y * towerHeight / levelConfiguration.height;
+        return result;
+    }
 
-        //First coordinate search
-        float distanceToMoveX = currentNode.Value.x / imageWidth * polygonLength;
-        float distanceToMoveXInternal = currentNode.Value.x / imageWidth * polygonLengthInternal;
-        Vector3 vertexCoordinates = polygonVertices[0];
-        Vector3 vertexCoordinatesInternal = polygonVerticesInternal[0];
-        int polygonVertexNumber = 0;
-        for (int i = 0; i < polygonVertices.Length; i+=2) {
-            float pvDistance = Vector3.Distance(vertexCoordinates, polygonVertices[(i+2)%polygonVertices.Length]);
-            float pvDistanceInternal = Vector3.Distance(vertexCoordinatesInternal, polygonVerticesInternal[(i+2)%polygonVerticesInternal.Length]);
-            if (distanceToMoveX > pvDistance) {
-                distanceToMoveX -= pvDistance;
-                distanceToMoveXInternal -= pvDistanceInternal;
-                vertexCoordinates = polygonVertices[(i+2)%polygonVertices.Length];
-                vertexCoordinatesInternal = polygonVerticesInternal[(i+2)%polygonVerticesInternal.Length];
-            }
-            else {
-                vertexCoordinates = Vector3.MoveTowards(vertexCoordinates, polygonVertices[(i+2)%polygonVertices.Length], distanceToMoveX);
-                vertexCoordinatesInternal = Vector3.MoveTowards(vertexCoordinatesInternal, polygonVerticesInternal[(i+2)%polygonVerticesInternal.Length], distanceToMoveXInternal);
-                distanceToMoveX = 0;
-                distanceToMoveXInternal = 0;
-                polygonVertexNumber = i;
-                break;
-            }
-        }
-        vertexCoordinates += Vector3.up * (currentNode.Value.y / imageHeigth * towerHeight);
-        vertexCoordinatesInternal += Vector3.up * (currentNode.Value.y / imageHeigth * towerHeight);
-        levelFigureVertices.Add(vertexCoordinates);
-        levelFigureVerticesInternal.Add(vertexCoordinatesInternal);
-        float distanceToMoveY;
-        int figureVerticesCount = figureVertices.Count;
-        for (int i = 0; i < figureVerticesCount; i++)
+    Mesh CreateFigureMesh(Vector2[] vertices, int[] triangles) {
+        towerVerticesExternal = CreatePolygonVerteces(vertexNumber, towerRadius);
+        towerVerticesInternal = CreatePolygonVerteces(vertexNumber, towerRadius - floorWidth);
+        Vector3[] vertices3D = new Vector3[vertices.Length];
+        Vector3[] vertices3DInternal = new Vector3[vertices.Length];
+
+        for (int i = 0; i < vertices.Length; i++)
         {
-            distanceToMoveX = (nextNode.Value.x - currentNode.Value.x) * polygonLength / imageWidth;
-            distanceToMoveXInternal = (nextNode.Value.x - currentNode.Value.x) * polygonLengthInternal / imageWidth;
-            distanceToMoveY = (nextNode.Value.y - currentNode.Value.y) * towerHeight / imageHeigth;
-            float pvDistance;
-            float pvDistanceInternal;
-            if (distanceToMoveX != 0) {
-                int j, nj;
-                j = polygonVertexNumber;
-                nj = distanceToMoveX > 0 ? j + 2 : j;
-                while (true) {  
-                    // Debug.Log($"j: {j}, nj: {nj}, polygonVertices.Length: {polygonVertices.Length}, res: {(nj)%polygonVertices.Length}");
-                    if (Vector3.Distance(new Vector3 (vertexCoordinates.x, 0, vertexCoordinates.z), polygonVertices[(nj)%polygonVertices.Length]) < coordinateError) {
-                        j = distanceToMoveX > 0 ? nj : j - 2;
-                        nj = distanceToMoveX > 0 ? j + 2 : j; 
-                    }  
-                    pvDistance = Vector3.Distance(new Vector3 (vertexCoordinates.x, 0, vertexCoordinates.z), polygonVertices[(nj)%polygonVertices.Length]);
-                    pvDistanceInternal = Vector3.Distance(new Vector3 (vertexCoordinatesInternal.x, 0, vertexCoordinatesInternal.z), polygonVerticesInternal[(nj)%polygonVerticesInternal.Length]);
-                    if (Mathf.Abs(distanceToMoveX) > pvDistance || Mathf.Abs(Mathf.Abs(distanceToMoveX) - pvDistance) < coordinateError) {
-                        vertexCoordinates = new Vector3(polygonVertices[(nj)%polygonVertices.Length].x, vertexCoordinates.y, polygonVertices[(nj)%polygonVertices.Length].z);
-                        vertexCoordinatesInternal = new Vector3(polygonVerticesInternal[(nj)%polygonVerticesInternal.Length].x, vertexCoordinatesInternal.y, polygonVerticesInternal[(nj)%polygonVerticesInternal.Length].z);
-                        float vertexYCoord = vertexCoordinates.y;
-                        vertexCoordinates += Vector3.up * (pvDistance / Mathf.Abs(distanceToMoveX)) * distanceToMoveY;
-                        vertexCoordinatesInternal += Vector3.up * (pvDistance / Mathf.Abs(distanceToMoveX)) * distanceToMoveY;
-                        distanceToMoveY -= vertexCoordinates.y - vertexYCoord;
-                        if (Mathf.Abs(Mathf.Abs(distanceToMoveX) - pvDistance) > coordinateError) {
-                            currentNode = figureVertices.AddAfter(currentNode, new Vector2( currentNode.Value.x + (pvDistance / Mathf.Abs(distanceToMoveX)) * (nextNode.Value.x - currentNode.Value.x), 
-                                                                                            currentNode.Value.y + (pvDistance / Mathf.Abs(distanceToMoveX)) * (nextNode.Value.y - currentNode.Value.y)));
-                        }
-                        distanceToMoveX += distanceToMoveX > 0 ? -pvDistance : pvDistance;
-                        distanceToMoveXInternal += distanceToMoveXInternal > 0 ? -pvDistanceInternal : pvDistanceInternal;
-                        levelFigureVertices.Add(vertexCoordinates);
-                        levelFigureVerticesInternal.Add(vertexCoordinatesInternal);
-                        if (Mathf.Abs(distanceToMoveX) < coordinateError){
-                            distanceToMoveX = 0;
-                            distanceToMoveXInternal = 0;
-                            distanceToMoveY = 0;
-                            polygonVertexNumber = j;
-                            break;
-                        }
-                    }
-                    else {
-                        vertexCoordinates = Vector3.MoveTowards(new Vector3(vertexCoordinates.x, 0, vertexCoordinates.z), polygonVertices[(nj)%polygonVertices.Length], Mathf.Abs(distanceToMoveX)) + 
-                                            Vector3.up * (vertexCoordinates.y + distanceToMoveY);
-                        vertexCoordinatesInternal = Vector3.MoveTowards(new Vector3(vertexCoordinatesInternal.x, 0, vertexCoordinatesInternal.z), polygonVerticesInternal[(nj)%polygonVerticesInternal.Length], Mathf.Abs(distanceToMoveXInternal)) + 
-                                            Vector3.up * (vertexCoordinatesInternal.y + distanceToMoveY);
-                        levelFigureVertices.Add(vertexCoordinates);
-                        levelFigureVerticesInternal.Add(vertexCoordinatesInternal);
-                        distanceToMoveX = 0;
-                        distanceToMoveXInternal = 0;
-                        distanceToMoveY = 0;
-                        polygonVertexNumber = j;
-                        break;
-                    }
-                    j += distanceToMoveX > 0 ? 2 : -2;
-                    j += j < 0 ? polygonVertices.Length : 0;
-                    nj += distanceToMoveX > 0 ? 2 : -2;
-                    nj += nj < 0 ? polygonVertices.Length : 0;
-                }
-            }
-            else {
-                vertexCoordinates += Vector3.up * distanceToMoveY;
-                vertexCoordinatesInternal += Vector3.up * distanceToMoveY;
-                if (i < figureVerticesCount - 1) {
-                    levelFigureVertices.Add(vertexCoordinates);
-                    levelFigureVerticesInternal.Add(vertexCoordinatesInternal);
-                }
-            }
-
-            currentNode = nextNode;
-            nextNode = currentNode.Next == null ? figureVertices.First : currentNode.Next;
+            vertices3D[i] = TransformVector2To3(vertices[i], true);
+            vertices3DInternal[i] = TransformVector2To3(vertices[i], false);
         }
-        return (levelFigureVertices, levelFigureVerticesInternal, figureVertices);
+
+        Vector3[] mVertices = new Vector3[vertices.Length * 4 + triangles.Length];
+        int[] mTriangles = new int[vertices.Length * 6 + triangles.Length];
+
+        for (int i = 0; i < vertices.Length; i++)
+        {
+            int indexExt = i * 2;
+            int indexInt = vertices3D.Length * 2 + i * 2;
+
+            mVertices[indexExt] = vertices3D[i];
+            mVertices[indexExt + 1] = vertices3D[(i + 1) % vertices3D.Length];
+            mVertices[indexInt] = vertices3DInternal[i];
+            mVertices[indexInt + 1] = vertices3DInternal[(i + 1) % vertices3D.Length];
+
+            mTriangles[i * 6 + 0] = indexExt;
+            mTriangles[i * 6 + 1] = indexInt;
+            mTriangles[i * 6 + 2] = indexInt + 1;
+            mTriangles[i * 6 + 3] = indexInt + 1;
+            mTriangles[i * 6 + 4] = indexExt + 1;
+            mTriangles[i * 6 + 5] = indexExt;
+        }
+
+        int indexVertStart = vertices.Length * 4;
+        int indexTriangStart = vertices.Length * 6;
+        for (int i = 0; i < triangles.Length; i++)
+        {
+            mVertices[indexVertStart + i] = vertices3DInternal[triangles[i]];
+            mTriangles[indexTriangStart + i] = indexVertStart + i;
+        }
+        Mesh mesh = new Mesh();
+        mesh.vertices = mVertices;
+        mesh.triangles = mTriangles;
+        mesh.RecalculateNormals();
+        return mesh;
     }
 
-    (Vector3[], int[]) CreateFigureMesh(List<Vector3> wallVertices, List<Vector3> internalVertices, Utility.Figure figure) {
-        Vector3[] mVertices = new Vector3[wallVertices.Count + internalVertices.Count];
-        wallVertices.CopyTo(mVertices);
-        internalVertices.CopyTo(mVertices, wallVertices.Count);
-        int[] mTriangles = new int[(wallVertices.Count + internalVertices.Count) * 3 + (internalVertices.Count - 2) * 3];
-        for (int i = 0; i < wallVertices.Count; i++) {
-            mTriangles[i * 6 + 0] = i;
-            mTriangles[i * 6 + 1] = i + wallVertices.Count;
-            mTriangles[i * 6 + 2] = (i + 1) % wallVertices.Count + wallVertices.Count;
-            mTriangles[i * 6 + 3] = (i + 1) % wallVertices.Count + wallVertices.Count;
-            mTriangles[i * 6 + 4] = (i + 1) % wallVertices.Count;
-            mTriangles[i * 6 + 5] = i;
-        }
-
-        int[] frontTriangles = figure.CreateMesh(vertexNumber).triangles;
-        // Debug.Log($"wallVertices.Count: {wallVertices.Count}, internalVertices.Count: {internalVertices.Count}, " + 
-        //             $"result: {(wallVertices.Count + internalVertices.Count) * 3 + (internalVertices.Count - 2) * 3}" + 
-        //             $"frontTriangles.Length: {frontTriangles.Length}");
-        for (int i = 0; i < frontTriangles.Length; i++) {
-            // Debug.Log($"mTl: {mTriangles.Length}, mTi: {wallVertices.Count * 6 + i}, fTl: {frontTriangles.Length}, fTi: {i}");
-            mTriangles[wallVertices.Count * 6 + i] = frontTriangles[i] + wallVertices.Count;
-        }
-
-        return (mVertices, mTriangles);
-    }
-        void CreateTower() {
+    void CreateTower() {
         ClearAll();
-        List<Utility.Figure> figs2D = textureScanner.ScanTexture(levelConfiguration);
         MakeTowerWalls();
+        textureScanner.ScanTexture(levelConfiguration);
+        textureScanner.AddTowerEdges(vertexNumber);
+        List<Utility.Figure> figs2D = textureScanner.GetFigures();
         int x = 0;
-        
-        Mesh superMesh = new Mesh();
-        List<Vector3> verticesSM = new List<Vector3>();
-        List<int> trianglesSM = new List<int>();
-        int verticesCount = 0;
-        int trianglesCount = 0;
         foreach (Utility.Figure figure2D in figs2D) {
             x++;
-            // if (x != 10)
-            //     continue;
-            (List<Vector3> levelVertices, List<Vector3> levelVerticesInternal, LinkedList<Vector2> figureVertices) vert = CreateLevelFigureVertices(figure2D.GetVertices());
-            // int i = sphereSpawner.CreateSphereList();
-            // foreach (Vector3 v in vert.levelVertices) {
-            //     sphereSpawner.SpawnSphere(i, v, 1.5f);
-            // }
-            // i = sphereSpawner.CreateSphereList();
-            // foreach (Vector3 v in vert.levelVerticesInternal) {
-            //     sphereSpawner.SpawnSphere(i, v, 1.5f);
-            // }
-            
-            // GameObject figure = new GameObject();
-            // MeshFilter mf = figure.AddComponent<MeshFilter>();
-            // figure.GetComponent<Transform>().parent = tower.GetComponent<Transform>();
-            // figure.name = "Figure" + x;
-            // figure.tag = "EditorOnly";
-            // mf.mesh = CreateFigureMesh(vert.levelVertices, vert.levelVerticesInternal, figure2D);
-            (Vector3[] vs, int[] ts) res = CreateFigureMesh(vert.levelVertices, vert.levelVerticesInternal, figure2D);
-            for (int j = 0; j < res.vs.Length; j++) {
-                verticesSM.Add(res.vs[j]);
-            }
-            for (int j = 0; j < res.ts.Length; j++) {
-                trianglesSM.Add(res.ts[j] + verticesCount);
-            }
-            verticesCount += res.vs.Length;
-            trianglesCount += res.ts.Length;
-            // MeshRenderer mr = figure.AddComponent<MeshRenderer>();       
-            // mr.material = material;
-            // if (figures == null)
-                // figures = new List<GameObject>();   
-            // figures.Add(figure);  
+            (Vector2[] vertices, int[] triangles) res = figure2D.CreateMesh();
+            // Mesh mesh = CreateFigureMesh(res.vertices, res.triangles);
+            GameObject figure = new GameObject();
+            MeshFilter mf = figure.AddComponent<MeshFilter>();
+            figure.GetComponent<Transform>().parent = tower.GetComponent<Transform>();
+            figure.name = "Figure" + x;
+            figure.tag = "EditorOnly";
+            mf.mesh = CreateFigureMesh(res.vertices, res.triangles);
+            MeshRenderer mr = figure.AddComponent<MeshRenderer>();       
+            mr.material = materialInterior;
         }
-        Vector3[] vs = new Vector3[verticesSM.Count];
-        verticesSM.CopyTo(vs);
-        int[] ts = new int[trianglesSM.Count];
-        trianglesSM.CopyTo(ts);
-        superMesh.vertices = vs;
-        superMesh.triangles = ts;
-        superMesh.RecalculateNormals();
-        GameObject fig = new GameObject();
-        MeshFilter mf0 = fig.AddComponent<MeshFilter>();
-        fig.GetComponent<Transform>().parent = tower.GetComponent<Transform>();
-        fig.name = "Figure0";
-        fig.tag = "EditorOnly";
-        mf0.mesh = superMesh;
-        MeshRenderer mr0 = fig.AddComponent<MeshRenderer>();       
-        mr0.material = materialInterior;
-        if (figures == null)
-            figures = new List<GameObject>();   
-        figures.Add(fig);     
-        }
+    }
     
 
     void ClearAll() {
